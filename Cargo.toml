@@ -1,0 +1,20 @@
+[package]
+name = "varta"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+borsh = { version = "1.5", features = ["derive"] }
+rand = "0.8"
+hkdf = "0.12"
+x25519-dalek = { version = "2", features = ["static_secrets"] }
+sha2 = "0.10"
+aes-gcm = "0.10"
+aes-siv = "0.7"
+chacha20poly1305 = { version = "0.10", features = ["std"] }
+hex = "0.4"
+base64 = "0.21"
+hmac = "0.12"
+ed25519-dalek = "2"
+pqcrypto-traits = "0.3"
+pqcrypto-dilithium = "0.5"
