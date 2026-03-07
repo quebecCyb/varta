@@ -43,6 +43,17 @@ pub fn sign_hybrid(
     out
 }
 
+pub fn sign_ed25519(
+    ed25519_sk: &[u8; 32],
+    message: &[u8],
+) -> [u8; ED25519_SIG_LEN] {
+    // ED25519
+    let ed_sk = SigningKey::from_bytes(ed25519_sk);
+    let ed_sig = ed_sk.sign(message);
+
+    ed_sig.to_bytes()
+}
+
 // ==========================
 // Hybrid verify
 // ==========================

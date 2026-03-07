@@ -1,55 +1,16 @@
-use std::io::{self, Write, Read};
-use rand::rngs::OsRng;
-use rand::RngCore;
-use std::fs::File;
-use std::fs;
-// use sha2::{Sha256};
+use std::io::{self, Write};
 
 mod common;
 mod agent;
 mod crypto;
 mod vault_object;
+mod device;
 use crate::agent::Agent;
 mod operation;
 mod vault;
 use crate::vault::Vault;
+use crate::device::Device;
 
-const DEVICE_KEY_FILE: &str = "device_key";
-
-fn load_or_create_device_key() -> [u8; 32] {
-    let mut device_key: [u8; 32] = [0u8; 32];
-
-    if fs::exists(DEVICE_KEY_FILE).unwrap() {
-        println!("Reading device key...");
-        let mut file = File::open(DEVICE_KEY_FILE).unwrap();
-        file.read_exact(&mut device_key).unwrap();
-        println!("Device key read.");
-    }
-
-    if device_key == [0u8; 32] {
-        println!("Creating device key...");
-        OsRng.fill_bytes(&mut device_key);
-        let mut file = File::create(DEVICE_KEY_FILE).unwrap();
-        file.write_all(&device_key).unwrap();
-        println!("Device key created.");
-    }
-
-    println!("Device key: {:?}", device_key);
-    device_key
-}
-
-fn str_to_fixed_32(s: &str) -> Result<[u8; 32], &'static str> {
-    let bytes = s.as_bytes();
-
-    if bytes.len() > 32 {
-        return Err("Key must be at most 32 bytes");
-    }
-
-    let mut key = [0u8; 32];
-    key[..bytes.len()].copy_from_slice(bytes);
-
-    Ok(key)
-}
 
 fn read_input() -> String {
     let mut input = String::new();
@@ -74,7 +35,7 @@ fn print_help() {
 }
 
 fn main() {
-    let _device_key = load_or_create_device_key();
+    let _device = Device::new();
 
     let mut current_agent: Option<Agent> = None;
     let mut current_vault: Option<Vault> = None;
@@ -121,7 +82,7 @@ fn main() {
                             continue;
                         }
 
-                        let agent = Agent::create(args[2].to_string());
+                        let agent = Agent::new(args[2].to_string(), None);
                         println!("Agent '{}' created", agent.name);
 
                         current_agent = Some(agent);
@@ -166,9 +127,8 @@ fn main() {
                             continue;
                         }
                         println!("Creating vault '{}'...", args[2]);
-                        // create_vault(args[2].to_string(), agent);
-                        let derivation_key = agent.get_vault_derivation_key();
-                        current_vault = Some(Vault::create(args[2].to_string(), agent, derivation_key));
+                        
+                        current_vault = Some(Vault::new(args[2].to_string(), agent));
                     }
                     "open" => {
                         if args.len() < 3 {
@@ -176,9 +136,7 @@ fn main() {
                             continue;
                         }
                         println!("Opening vault '{}'...", args[2]);
-                        // open_vault(args[2].to_string(), agent);
-                        let derivation_key = agent.get_vault_derivation_key();
-                        current_vault = Some(Vault::open(args[2].to_string(), agent, derivation_key));
+                        current_vault = Some(Vault::open(args[2].to_string(), agent));
                     }
                     "close" => {
                         if let Some(vault) = &current_vault {
@@ -229,11 +187,8 @@ fn main() {
 
                         let value = args[3].as_bytes().to_vec();
                         
-                        if vault.update_object(key, value) {
-                            println!("Object updated: {}", key);
-                        } else {
-                            println!("Object not found: {}", key);
-                        }
+                        vault.update_object(key, value);
+                        println!("Object updated: {}", key);
                     }
                     "list" => {
                         println!("Listing objects...");
@@ -250,12 +205,9 @@ fn main() {
 
                         let key: &str = args[2];
                         
-                        if let Some(obj) = vault.read_object(key) {
-                            println!("Object read: {}", key);
-                            println!("Value: {}", String::from_utf8_lossy(&obj.value));
-                        } else {
-                            println!("Object not found: {}", key);
-                        }
+                        let obj = vault.read_object(key);
+                        let value = String::from_utf8(obj.value.clone()).unwrap();
+                        println!("Object read: {}", value);
                     }
                     "delete" => {
                         if args.len() < 3 {
@@ -266,11 +218,8 @@ fn main() {
                         
                         let key: &str = args[2];
                         
-                        if vault.delete_object(key) {
-                            println!("Object deleted: {}", key);
-                        } else {
-                            println!("Object not found: {}", key);
-                        }
+                        vault.delete_object(key);
+                        println!("Object deleted: {}", key);
                     }
                     _ => println!("Unknown object command: {}", args[1]),
                 }
