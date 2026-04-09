@@ -27,12 +27,12 @@ pub struct VaultObject {
     agent_id: [u8; 32],
 
     #[borsh(skip)]
-    vault_aes_key: Option<[u8; 16]>,
+    vault_aes_key: Option<[u8; 32]>,
 }
 
 
 impl VaultObject {
-    pub fn new(key: String, value: Vec<u8>, vault_name: String, agent_id: [u8; 32], vault_aes_key: Option<[u8; 16]>) -> Self {
+    pub fn new(key: String, value: Vec<u8>, vault_name: String, agent_id: [u8; 32], vault_aes_key: Option<[u8; 32]>) -> Self {
         let timestamp = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .unwrap()
@@ -66,7 +66,7 @@ impl VaultObject {
         println!("Object saved: {}", path);
     }
 
-    pub fn open(vault_name: &str, agent_id: [u8; 32], encrypted_filename: String, vault_aes_key: [u8; 16]) -> Self {
+    pub fn open(vault_name: &str, agent_id: [u8; 32], encrypted_filename: String, vault_aes_key: [u8; 32]) -> Self {
         let key: String = VaultObject::get_decrypted_filename(&vault_aes_key, &encrypted_filename);
         let path = VaultObject::get_path(&vault_aes_key, agent_id, vault_name, &key);
         
@@ -102,10 +102,10 @@ impl VaultObject {
     }
 
 
-    pub fn derive_vault_object_key(vault_aes_key: &[u8; 16], key: &str) -> [u8; 16] {
+    pub fn derive_vault_object_key(vault_aes_key: &[u8; 32], key: &str) -> [u8; 32] {
         let salt = "varta_vault_object_aes_encryption";
         let hkdf = Hkdf::<Sha256>::new(Some(salt.as_bytes()), vault_aes_key);
-        let mut aes_key = [0u8; 16];
+        let mut aes_key = [0u8; 32];
         let context: &[u8] = key.as_bytes();
         hkdf.expand(context, &mut aes_key)
             .expect("HKDF expansion failed");
@@ -113,6 +113,18 @@ impl VaultObject {
         aes_key
     }
 
+
+    ////////////////////////
+    // GETTERS /////////////
+    ////////////////////////
+
+    pub fn get_key(&self) -> &str {
+        &self.key
+    }
+
+    pub fn get_value(&self) -> &[u8] {
+        &self.value
+    }
 
     ////////////////////////
     // OPERATIONS //////////
@@ -142,15 +154,15 @@ impl VaultObject {
     // STATIC //////////////
     ////////////////////////
 
-    pub fn get_encrypted_filename(vault_aes_key: &[u8; 16], key: &str) -> String {
+    pub fn get_encrypted_filename(vault_aes_key: &[u8; 32], key: &str) -> String {
         format!("{}.ob", symm_enc::encrypt_filename(vault_aes_key, key))
     }
 
-    pub fn get_decrypted_filename(vault_aes_key: &[u8; 16], hex_name: &str) -> String {
-        symm_enc::decrypt_filename(vault_aes_key, hex_name.split(".").next().unwrap()) 
+    pub fn get_decrypted_filename(vault_aes_key: &[u8; 32], hex_name: &str) -> String {
+        symm_enc::decrypt_filename(vault_aes_key, hex_name.split(".").next().unwrap())
     }
 
-    pub fn get_path(vault_aes_key: &[u8; 16], agent_id: [u8; 32], vault_name: &str, key: &str) -> String {
+    pub fn get_path(vault_aes_key: &[u8; 32], agent_id: [u8; 32], vault_name: &str, key: &str) -> String {
         let vault_path = Vault::get_path_objects(agent_id, vault_name);
         let encrypted_filename = VaultObject::get_encrypted_filename(vault_aes_key, key);
         format!("{}/{}", vault_path, encrypted_filename)

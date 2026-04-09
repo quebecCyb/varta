@@ -7,18 +7,31 @@ use borsh::{BorshSerialize, BorshDeserialize, from_slice, to_vec};
 use crate::device::Device;
 use crate::vault::Vault;
 use crate::vault_object::VaultObject;
-use crate::crypto::sign::sign_ed25519;
 use crate::crypto::symm_enc;
 use std::fs;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 
+// STRUCTURAL
 pub const OP_VAULT_CREATED: &str = "VaultCreated";
 pub const OP_CREATE: &str = "Create";
 pub const OP_UPDATE: &str = "Update";
 pub const OP_DELETE: &str = "Delete";
+
+// SYNC
 pub const OP_MERGE: &str = "Merge";
 pub const OP_CONFLICT: &str = "Conflict";
+
+/// AUDIT
+// net
+pub const OP_SYNC: &str = "Sync";
+pub const OP_SYNC_SUCCESS: &str = "SyncSuccess";
+pub const OP_SYNC_FAIL: &str = "SyncFail";
+
+// offline
+pub const OP_ACCESS: &str = "Access"; // VAULT / AGENT
+pub const OP_LIST: &str = "List";
+pub const OP_READ: &str = "Read";
 
 
 #[derive(BorshSerialize, BorshDeserialize)]
@@ -46,10 +59,13 @@ pub struct Operation {
 impl Operation {
     pub fn initial(aes_key: &[u8; 32], agent_id: [u8; 32], vault_name: &str) -> Self {
         let timestamp = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs();
-        let device = Device::load().unwrap();
+        let device_id = {
+            let device = Device::instance();
+            device.get_id()
+        }; // Lock освобождается здесь
 
         let mut op = Self {
-            device_id: device.device_id,
+            device_id,
             agent_id,
             vault_name: vault_name.to_string(),
             device_clock: 0,
@@ -74,21 +90,24 @@ impl Operation {
     
     pub fn new(aes_key: &[u8; 32], vault: &Vault, obj: &VaultObject, operation_type: &str, prev_op: &Operation) -> Self {
         let timestamp = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs();
-        let device = Device::load().unwrap();
+        let device_id = {
+            let device = Device::instance();
+            device.get_id()
+        }; // Lock освобождается здесь
 
         let mut vector_clock = prev_op.vector_clock.clone();
 
-        if !vector_clock.contains_key(&device.device_id) {
-            vector_clock.insert(device.device_id, 0);
+        if !vector_clock.contains_key(&device_id) {
+            vector_clock.insert(device_id, 0);
         }
 
-        vector_clock.insert(device.device_id, vector_clock.get(&device.device_id).unwrap() + 1);
+        vector_clock.insert(device_id, vector_clock.get(&device_id).unwrap() + 1);
 
         let mut op = Self {
-            device_id: device.device_id,
+            device_id,
             agent_id: vault.get_agent_id(),
             vault_name: vault.name.clone(),
-            device_clock: *vector_clock.get(&device.device_id).unwrap(),
+            device_clock: *vector_clock.get(&device_id).unwrap(),
             vector_clock,
             timestamp,
             operation_type: operation_type.to_string(),
@@ -143,8 +162,10 @@ impl Operation {
     ////////////////////
 
     pub fn sign(&mut self) {
-        let device = Device::load().unwrap();
-        let signature = sign_ed25519(&device.get_device_key(), &self.op_iter_hash);
+        let signature = {
+            let device = Device::instance();
+            device.sign(&self.op_iter_hash)
+        }; // Lock освобождается здесь
         self.signature = signature.to_vec();
     }
 
@@ -176,10 +197,10 @@ impl Operation {
     }
 
 
-    pub fn derive_operation_key(vault_aes_key: &[u8; 32], key: &str) -> [u8; 16] {
+    pub fn derive_operation_key(vault_aes_key: &[u8; 32], key: &str) -> [u8; 32] {
         let salt = "varta_operation_aes_encryption";
         let hkdf = Hkdf::<Sha256>::new(Some(salt.as_bytes()), vault_aes_key);
-        let mut aes_key = [0u8; 16];
+        let mut aes_key = [0u8; 32];
         let context: &[u8] = key.as_bytes();
         hkdf.expand(context, &mut aes_key)
             .expect("HKDF expansion failed");

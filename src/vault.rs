@@ -8,10 +8,12 @@ use sha2::{Sha256, Digest};
 use borsh::{BorshSerialize, BorshDeserialize, from_slice, to_vec};
 
 use crate::common::{VERSION, generate_random_key};
-use crate::agent::Agent;
 use crate::operation::{Operation, OP_CREATE};
 use crate::vault_object::VaultObject;
 use crate::crypto::symm_enc;
+use crate::agent::Agent;
+use zeroize::Zeroize;
+
 
 #[derive(BorshSerialize, BorshDeserialize)]
 pub struct Vault {
@@ -25,39 +27,37 @@ pub struct Vault {
     vault_digest: [u8; 32],
 
     #[borsh(skip)]
-    aes_metadata_key: Option<[u8; 16]>,
+    meta_key: Option<[u8; 32]>,
 
     #[borsh(skip)]
     last_op: Option<Operation>,
-
-    #[borsh(skip)]
-    objects: HashMap<String, VaultObject>,
 }
 
 impl Vault {
     pub fn new(
-        name: String, agent: &Agent //, derivation_key: [u8; 32]
+        name: String, agent_id: [u8; 32], derivation_key: &[u8; 32]
     ) -> Self {
-        let derivation_key = agent.get_vault_derivation_key();
-        let aes_metadata_key = Vault::derive_meta_key(&derivation_key, &name);
         let master_key = generate_random_key();
-        let agent_id = Agent::get_id(&agent.name);
+        let meta_key = Vault::derive_meta_key(derivation_key, &name);
+        let last_op = Some(Operation::initial(&master_key, agent_id, &name));
+
         let vault = Self {
-            name: name.clone(),
+            version: VERSION,
+            name,
             agent_id,
             master_key,
-            version: VERSION,
             vault_digest: [0u8; 32],
-            // ops: Vec::new(),
-            objects: HashMap::new(),
-            aes_metadata_key: Some(aes_metadata_key),
-            last_op: Some(Operation::initial(&master_key, agent_id, &name)),
+            meta_key: Some(meta_key),
+            last_op,
         };
+
         vault.save();
+
         vault
     }
 
     pub fn save(&self) {
+        let meta_key = self.meta_key.expect("Meta key should be set");
         let vault_path = Vault::get_path(self.agent_id, &self.name);
         let objects_path = Vault::get_path_objects(self.agent_id, &self.name);
         let operations_path = Vault::get_path_operations(self.agent_id, &self.name);
@@ -74,20 +74,18 @@ impl Vault {
             fs::create_dir_all(&operations_path).unwrap();
         }
 
-        let aes_metadata_key = self.aes_metadata_key.expect("No AES Metadata Key set up!");
         let plaintext = to_vec(self).unwrap();
-        let (nonce, ciphertext) = symm_enc::encrypt(&aes_metadata_key, &plaintext);
+        let (nonce, ciphertext) = symm_enc::encrypt(&meta_key, &plaintext);
 
         let encrypted_data = (nonce, ciphertext);
         fs::write(format!("{}/index", &vault_path), to_vec(&encrypted_data).unwrap()).unwrap();
         println!("Vault saved: {}", vault_path);
     }
 
-    pub fn open(name: String, agent: &Agent) -> Vault {
-        let derivation_key = agent.get_vault_derivation_key();
-        let aes_metadata_key = Vault::derive_meta_key(&derivation_key, &name);
+    pub fn open(name: String, agent_id: [u8; 32], derivation_key: &[u8; 32]) -> Vault {
+        let meta_key = Vault::derive_meta_key(derivation_key, &name);
         
-        let path = Vault::get_path(Agent::get_id(&agent.name), &name);
+        let path = Vault::get_path(agent_id, &name);
     
         if !fs::exists(&path).unwrap() {
             panic!("Vault not found: {}", name);
@@ -95,12 +93,12 @@ impl Vault {
         
         let data = fs::read(format!("{}/index", &path)).unwrap();
         let (nonce, ciphertext): (Vec<u8>, Vec<u8>) = from_slice(&data).unwrap();
-        let decrypted = symm_enc::decrypt(&aes_metadata_key, &nonce, &ciphertext);
+        let decrypted = symm_enc::decrypt(&meta_key, &nonce, &ciphertext);
         let mut vault: Vault = from_slice(&decrypted).unwrap();
-        vault.aes_metadata_key = Some(aes_metadata_key);
         
+        vault.meta_key = Some(meta_key);
+
         println!("Vault loaded: {}", name);
-        vault.restore_objects();
         vault.read_last_op();
         vault
     }
@@ -128,6 +126,10 @@ impl Vault {
     // Getters //
     /////////////
 
+    pub fn get_name(&self) -> &str {
+        &self.name
+    }
+
     pub fn get_agent_id(&self) -> [u8; 32] {
         self.agent_id
     }
@@ -137,60 +139,68 @@ impl Vault {
     // OPERATIONS //////////
     ////////////////////////
 
-    pub fn create_object(&mut self, key: String, value: Vec<u8>) {
-        let obj = VaultObject::new(key, value, self.name.clone(), self.agent_id, Some(self.derive_vault_key()));
-        self.vault_digest = self.hash();
-
-        self.last_op = Some(Operation::new(
-            &self.master_key,
-            &self,
-            &obj,
-            OP_CREATE,
-            self.last_op.as_ref().expect("No last operation found!"),
-        ));
-
-        self.objects.insert(obj.key.clone(), obj);
-
+    fn execute_operation<F>(&mut self, operation_name: &str, operation: F)
+    where
+        F: FnOnce(&mut Self),
+    {
+        let old_digest = self.vault_digest;
+        
+        operation(self);
+        
+        let new_digest = self.hash();
+        self.vault_digest = new_digest;
+        
+        if old_digest != new_digest {
+            println!("⚠️  Vault state changed after '{}'", operation_name);
+            println!("   Old hash: {}", hex::encode(old_digest));
+            println!("   New hash: {}", hex::encode(new_digest));
+        }
+        
         self.save();
+    }
+
+    pub fn exists_object(&self, key: &str) -> bool {
+        let path = VaultObject::get_path(&self.derive_vault_key(), self.agent_id, &self.name, key);
+        fs::exists(&path).unwrap_or(false)
+    }
+
+    pub fn create_object(&mut self, key: String, value: Vec<u8>) {
+        if self.exists_object(&key) {
+            panic!("Object already exists: {}", key);
+        }
+        
+        self.execute_operation("create_object", |vault| {
+            let obj = VaultObject::new(
+                key.clone(),
+                value,
+                vault.name.clone(),
+                vault.agent_id,
+                Some(vault.derive_vault_key())
+            );
+
+            vault.last_op = Some(Operation::new(
+                &vault.master_key,
+                vault,
+                &obj,
+                OP_CREATE,
+                vault.last_op.as_ref().expect("No last operation found!"),
+            ));
+        });
     }
 
     pub fn update_object(&mut self, key: &str, value: Vec<u8>) {
-        if !self.objects.contains_key(key) {
+        if !self.exists_object(key) {
             panic!("Object not found: {}", key);
         }
         
-        let obj = self.objects.get_mut(key).unwrap();
-        obj.update(value);
-
-        self.vault_digest = self.hash();
-        self.save();
+        self.execute_operation("update_object", |vault| {
+            let encrypt_filename = VaultObject::get_encrypted_filename(&vault.derive_vault_key(), key);
+            let mut obj = VaultObject::open(&vault.name, vault.agent_id, encrypt_filename, vault.derive_vault_key());
+            obj.update(value);
+        });
     }
 
     pub fn list_objects(&self) -> Vec<String> {
-        self.objects.keys().cloned().collect()
-    }
-
-    pub fn read_object(&self, key: &str) -> &VaultObject {
-        if !self.objects.contains_key(key) {
-            panic!("Object not found: {}", key);
-        }
-        
-        self.objects.get(key).unwrap()
-    }
-
-    pub fn delete_object(&mut self, key: &str) {
-        if !self.objects.contains_key(key) {
-            panic!("Object not found: {}", key);
-        }
-        
-        let obj = self.objects.remove(key).unwrap();
-        obj.delete();
-
-        self.vault_digest = self.hash();
-        self.save();
-    }
-
-    pub fn restore_objects(&mut self) {
         let obs_path = Vault::get_path_objects(self.agent_id, &self.name);
 
         println!("Restoring objects from: {}", obs_path);
@@ -198,32 +208,78 @@ impl Vault {
         if !fs::exists(&obs_path).unwrap() {
             panic!("Objects directory not found: {}", obs_path);
         }
+    
+        let mut objects: Vec<String> = Vec::new();
+
+        for entry in fs::read_dir(&obs_path).unwrap() {
+            let entry = entry.unwrap();
+            let path = entry.path();
+            if path.is_file() {
+                let filename: &str = path.file_name().unwrap().to_str().unwrap();
+                objects.push(VaultObject::get_decrypted_filename(&self.derive_vault_key(), filename));
+            }
+        }
+        
+        objects
+    }
+
+    pub fn read_object(&self, key: &str) -> VaultObject {
+        if !self.exists_object(key) {
+            panic!("Object not found: {}", key);
+        }
+        
+        let encrypt_filename = VaultObject::get_encrypted_filename(&self.derive_vault_key(), key);
+        let obj = VaultObject::open(&self.name, self.agent_id, encrypt_filename, self.derive_vault_key());
+        obj
+    }
+
+    pub fn delete_object(&mut self, key: &str) {
+        if !self.exists_object(key) {
+            panic!("Object not found: {}", key);
+        }
+        
+        self.execute_operation("delete_object", |vault| {
+            let encrypt_filename = VaultObject::get_encrypted_filename(&vault.derive_vault_key(), key);
+            let obj = VaultObject::open(&vault.name, vault.agent_id, encrypt_filename, vault.derive_vault_key());
+            obj.delete();
+        });
+    }
+
+    pub fn restore_vault(&self) -> HashMap<String, Vec<u8>> {
+        let obs_path = Vault::get_path_objects(self.agent_id, &self.name);
+
+        println!("Restoring objects from: {}", obs_path);
+        
+        if !fs::exists(&obs_path).unwrap() {
+            panic!("Objects directory not found: {}", obs_path);
+        }
+    
+        let mut objects = HashMap::new();
 
         for entry in fs::read_dir(&obs_path).unwrap() {
             let entry = entry.unwrap();
 
             if entry.path().is_file() {
                 let encrypted_filename = entry.file_name().into_string().unwrap();
-                let obj = VaultObject::open(&self.name, self.agent_id, encrypted_filename, self.derive_vault_key());
+                let binary_data = fs::read(&entry.path()).unwrap();
                 
-                self.objects.insert(obj.key.clone(), obj);
+                objects.insert(encrypted_filename, binary_data);
             }
         }
         
-        println!("Objects restored: {}", self.objects.len());
-
-        self.vault_digest = self.hash();
-        self.save();
+        println!("Objects restored: {}", objects.len());
+        
+        objects
     }
 
     ////////////////////////
     // CRYPTO /////////////
     ////////////////////////
 
-    pub fn derive_vault_key(&self) -> [u8; 16] {
+    pub fn derive_vault_key(&self) -> [u8; 32] {
         let salt = "varta_vault_aes_encryption";
         let hkdf = Hkdf::<Sha256>::new(Some(salt.as_bytes()), &self.master_key);
-        let mut aes_key = [0u8; 16];
+        let mut aes_key = [0u8; 32];
         let context: &[u8] = self.name.as_bytes();
         hkdf.expand(context, &mut aes_key)
             .expect("HKDF expansion failed");
@@ -235,10 +291,10 @@ impl Vault {
     pub fn derive_meta_key(
         derivation_key: &[u8; 32],
         name: &str,
-    ) -> [u8; 16] {
+    ) -> [u8; 32] {
         let salt = format!("varta_meta_encryption");
         let hkdf = Hkdf::<Sha256>::new(Some(salt.as_bytes()), derivation_key);
-        let mut aes_key = [0u8; 16];
+        let mut aes_key = [0u8; 32];
         let context: &[u8] = name.as_bytes();
         hkdf.expand(context, &mut aes_key)
             .expect("HKDF expansion failed");
@@ -256,12 +312,14 @@ impl Vault {
         hasher.update(&self.master_key);
 
         // Sort keys lexicographically for deterministic hashing
-        let mut sorted_keys: Vec<&String> = self.objects.keys().collect();
+        let objects: HashMap<String, Vec<u8>> = self.restore_vault();
+        let mut sorted_keys: Vec<&String> = objects.keys().collect();
         sorted_keys.sort();
         
         for key in sorted_keys {
-            let obj = self.objects.get(key).unwrap();
-            hasher.update(&obj.hash());
+            let value = objects.get(key).unwrap();
+            hasher.update(key.as_bytes());
+            hasher.update(value);
         }
 
         hasher.finalize().into()
@@ -290,5 +348,15 @@ impl Vault {
     pub fn get_path_operations(agent_id: [u8; 32], name: &str) -> String {
         let vault_path = Vault::get_path(agent_id, name);
         format!("{}/ops", vault_path)
+    }
+}
+
+impl Drop for Vault {
+    fn drop(&mut self) {
+        self.master_key.zeroize();
+        if let Some(ref mut key) = self.meta_key {
+            key.zeroize();
+        }
+        println!("🔒 Vault master_key and meta_key zeroized");
     }
 }
