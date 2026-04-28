@@ -1,37 +1,19 @@
 
-
 use std::collections::BTreeMap;
 use sha2::{Sha256, Digest};
 use hkdf::Hkdf;
 use borsh::{BorshSerialize, BorshDeserialize, from_slice, to_vec};
 use crate::device::Device;
+use crate::config::{
+    OPERATION_FILE_EXT,
+    OP_INITIAL, OP_CREATE,
+};
 use crate::vault::Vault;
 use crate::vault_object::VaultObject;
 use crate::crypto::symm_enc;
 use std::fs;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-
-// STRUCTURAL
-pub const OP_VAULT_CREATED: &str = "VaultCreated";
-pub const OP_CREATE: &str = "Create";
-pub const OP_UPDATE: &str = "Update";
-pub const OP_DELETE: &str = "Delete";
-
-// SYNC
-pub const OP_MERGE: &str = "Merge";
-pub const OP_CONFLICT: &str = "Conflict";
-
-/// AUDIT
-// net
-pub const OP_SYNC: &str = "Sync";
-pub const OP_SYNC_SUCCESS: &str = "SyncSuccess";
-pub const OP_SYNC_FAIL: &str = "SyncFail";
-
-// offline
-pub const OP_ACCESS: &str = "Access"; // VAULT / AGENT
-pub const OP_LIST: &str = "List";
-pub const OP_READ: &str = "Read";
 
 
 #[derive(BorshSerialize, BorshDeserialize)]
@@ -47,7 +29,7 @@ pub struct Operation {
     operation_type: String,
 
     value_key: Vec<u8>,
-    value: Vec<u8>,
+    value_hash: [u8; 32],
 
     vault_digest: [u8; 32],
     prev_op_hash: [u8; 32],
@@ -62,7 +44,7 @@ impl Operation {
         let device_id = {
             let device = Device::instance();
             device.get_id()
-        }; // Lock освобождается здесь
+        };
 
         let mut op = Self {
             device_id,
@@ -71,9 +53,9 @@ impl Operation {
             device_clock: 0,
             vector_clock: BTreeMap::new(),
             timestamp,
-            operation_type: OP_VAULT_CREATED.to_string(),
+            operation_type: OP_INITIAL.to_string(),
             value_key: Vec::new(),
-            value: Vec::new(),
+            value_hash: [0u8; 32],
             vault_digest: [0u8; 32],
             prev_op_hash: [0u8; 32],
             op_hash: [0u8; 32],
@@ -93,7 +75,7 @@ impl Operation {
         let device_id = {
             let device = Device::instance();
             device.get_id()
-        }; // Lock освобождается здесь
+        };
 
         let mut vector_clock = prev_op.vector_clock.clone();
 
@@ -106,14 +88,14 @@ impl Operation {
         let mut op = Self {
             device_id,
             agent_id: vault.get_agent_id(),
-            vault_name: vault.name.clone(),
+            vault_name: vault.get_name().to_string(),
             device_clock: *vector_clock.get(&device_id).unwrap(),
             vector_clock,
             timestamp,
             operation_type: operation_type.to_string(),
-            value_key: obj.key.as_bytes().to_vec(),
-            value: obj.value.clone(),
-            vault_digest: vault.hash(),
+            value_key: obj.key().as_bytes().to_vec(),
+            value_hash: obj.hash(),
+            vault_digest: vault.state_hash(),
             prev_op_hash: prev_op.op_hash,
             op_hash: [0u8; 32],
             op_iter_hash: [0u8; 32],
@@ -153,19 +135,19 @@ impl Operation {
         let encrypted_data = (nonce, ciphertext);
 
         fs::write(&path, to_vec(&encrypted_data).unwrap());
-        println!("Operation saved: {}_....op", Operation::format_clock(self.device_clock));
+        println!("Operation saved: {}_.....{}", Operation::format_clock(self.device_clock), OPERATION_FILE_EXT);
     }
 
 
-    ////////////////////
-    /// CRYPTO /////////
-    ////////////////////
+    /// =====================
+    /// CRYPTO 
+    /// =====================
 
     pub fn sign(&mut self) {
         let signature = {
             let device = Device::instance();
             device.sign(&self.op_iter_hash)
-        }; // Lock освобождается здесь
+        };
         self.signature = signature.to_vec();
     }
 
@@ -177,7 +159,7 @@ impl Operation {
         hasher.update(&self.timestamp.to_le_bytes());
         hasher.update(&self.operation_type.as_bytes());
         hasher.update(&self.value_key);
-        hasher.update(&self.value);
+        hasher.update(&self.value_hash);
         hasher.update(&self.vault_digest);
         hasher.update(&self.prev_op_hash);
 
@@ -214,7 +196,7 @@ impl Operation {
 
     // Static
     pub fn get_filename(device_clock: u64, op_hash: &[u8; 32]) -> String {
-        format!("{}_{}.op", Operation::format_clock(device_clock), hex::encode(op_hash))
+        format!("{}_{}.{}", Operation::format_clock(device_clock), hex::encode(op_hash), OPERATION_FILE_EXT)
     }
 }
 

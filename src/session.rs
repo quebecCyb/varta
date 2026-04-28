@@ -3,17 +3,20 @@ use crate::agent::Agent;
 use crate::vault::Vault;
 use zeroize::Zeroize;
 
+type Result<T> = std::result::Result<T, Box<dyn std::error::Error>>;
+
 pub struct Session {
     agent: Option<Agent>,
     vault: Option<Vault>,
-    kek: Vec<u8>,
+    // Session encrpytion for cache | future update 
+    // kek: Vec<u8>,
 }
 
 impl Session {
     pub fn new() -> Self {
         Device::initialize();
 
-        Self { agent: None, vault: None, kek: Vec::new() }
+        Self { agent: None, vault: None }
     }
 
     // Getters
@@ -26,14 +29,16 @@ impl Session {
     }
 
     // agents
-    pub fn create_agent(&mut self, name: String, password: Option<String>) {
+    pub fn create_agent(&mut self, name: String, password: Option<String>) -> Result<()> {
         let agent = Agent::new(name, password, None);
         self.agent = Some(agent);
+        Ok(())
     }
 
-    pub fn login_agent(&mut self, name: String, password: String) {
-        let agent = Agent::login(name, password);
+    pub fn login_agent(&mut self, name: String, password: String) -> Result<()> {
+        let agent = Agent::login(name, password)?;
         self.agent = Some(agent);
+        Ok(())
     }
 
     pub fn switch(&mut self) {
@@ -42,66 +47,72 @@ impl Session {
     }
 
     // Vaults
-    pub fn new_vault(&mut self, name: String) {
-        let agent = self.agent.as_ref().expect("No agent logged in");
+    pub fn new_vault(&mut self, name: String) -> Result<()> {
+        let agent = self.agent.as_ref()
+            .ok_or("No agent logged in")?;
         let mut v_key = agent.derive_vault_key(&name); 
-        let vault = Vault::new(name, Agent::get_id(agent.get_name()), &v_key);
+        let vault = Vault::new(name, agent.id(), &v_key)?;
         v_key.zeroize();
         self.vault = Some(vault);
+        Ok(())
     }
 
-    pub fn open_vault(&mut self, name: String) {
-        let agent = self.agent.as_ref().expect("No agent logged in");
+    pub fn open_vault(&mut self, name: String) -> Result<()> {
+        let agent = self.agent.as_ref()
+            .ok_or("No agent logged in")?;
         let mut v_key = agent.derive_vault_key(&name); 
-        let vault = Vault::open(name, Agent::get_id(agent.get_name()), &v_key);
+        let vault = Vault::open(name, agent.id(), &v_key)?;
         v_key.zeroize();
         self.vault = Some(vault);
+        Ok(())
     }
 
-    pub fn close_vault(&mut self) {
-        drop(self.vault.take());
+    pub fn close_vault(&mut self) -> Result<()> {
+        self.vault.take()
+            .ok_or("No vault opened")?;
+        Ok(())
     }
 
     // Objects 
-    pub fn add_object(&mut self, key: String, value: Vec<u8>) {
-        self.vault.as_mut().unwrap().create_object(key, value);
+    pub fn add_object(&mut self, key: String, value: Vec<u8>) -> Result<()> {
+        let vault = self.vault.as_mut()
+            .ok_or("No vault opened")?;
+        vault.create_object(key, value)?;
+        Ok(())
     }
 
-    pub fn update_object(&mut self, key: String, value: Vec<u8>) {
-        self.vault.as_mut().unwrap().update_object(&key, value);
+    pub fn update_object(&mut self, key: String, value: Vec<u8>) -> Result<()> {
+        let vault = self.vault.as_mut()
+            .ok_or("No vault opened")?;
+        vault.update_object(&key, value)?;
+        Ok(())
     }
 
-    pub fn list_objects(&self) -> Vec<String> {
-        self.vault.as_ref().unwrap().list_objects()
+    pub fn list_objects(&self) -> Result<Vec<String>> {
+        let vault = self.vault.as_ref()
+            .ok_or("No vault opened")?;
+        vault.list_objects()
     }
 
-    pub fn read_object(&self, key: &str) -> crate::vault_object::VaultObject {
-        self.vault.as_ref().unwrap().read_object(key)
+    pub fn read_object(&self, key: &str) -> Result<crate::vault_object::VaultObject> {
+        let vault = self.vault.as_ref()
+            .ok_or("No vault opened")?;
+        vault.read_object(key)
     }
 
-    pub fn delete_object(&mut self, key: &str) {
-        self.vault.as_mut().unwrap().delete_object(key)
+    pub fn delete_object(&mut self, key: &str) -> Result<()> {
+        let vault = self.vault.as_mut()
+            .ok_or("No vault opened")?;
+        vault.delete_object(key)?;
+        Ok(())
     }
 }
 
 
 impl Drop for Session {
     fn drop(&mut self) {
-        // Явно уничтожаем Agent и Vault, чтобы вызвать их Drop
-        if let Some(agent) = self.agent.take() {
-            drop(agent);
-        }
-        
-        if let Some(vault) = self.vault.take() {
-            drop(vault);
-        }
-        
-        // Очищаем KEK
-        self.kek.zeroize();
-        
-        // Device будет автоматически очищен через свой Drop
-        
-        println!("🔒 Session cleaned and dropped");
+        self.agent.take();
+        self.vault.take();
     }
 }
 

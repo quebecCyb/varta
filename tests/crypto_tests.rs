@@ -1,6 +1,6 @@
 use varta::crypto::symm_enc;
 use varta::crypto::sign::{sign_ed25519, sign_hybrid, verify_hybrid, keypair_postq, ED25519_SIG_LEN};
-use varta::common::generate_random_key;
+use varta::config::generate_random_key;
 
 #[test]
 fn test_symmetric_encryption_decryption() {

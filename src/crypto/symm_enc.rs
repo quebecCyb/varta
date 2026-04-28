@@ -14,7 +14,7 @@ pub fn encrypt(
 ) -> (Vec<u8>, Vec<u8>) {
     let cipher = Aes256Gcm::new(aes_key.into());
 
-    let nonce_bytes = crate::common::generate_random_key();
+    let nonce_bytes = crate::config::generate_random_key();
     let nonce = Nonce::<Aes256Gcm>::from_slice(&nonce_bytes[0..12]);
 
 
