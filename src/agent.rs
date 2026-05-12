@@ -1,5 +1,5 @@
 use std::fs;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use sha2::{Sha256, Digest};
 use hex;
 use hkdf::Hkdf;
@@ -64,15 +64,15 @@ impl Agent {
     pub fn save(&self, meta_key: [u8; 32]) -> Result<()> {
         let agent_path = Agent::get_path(self.id());
 
-        if !Path::new(&agent_path).exists() {
+        if !agent_path.exists() {
             fs::create_dir_all(&agent_path)?;
         }
 
         let (nonce, cypher) = symm_enc::encrypt(&meta_key, &self.master_key);
         let serialized = serialize_encrypted(&nonce, &cypher);
         
-        let master_key_path = format!("{}/{}", agent_path, MASTER_KEY_FILE);
-        fs::write(&master_key_path, serialized)?;
+        let master_key_path = agent_path.join(MASTER_KEY_FILE);
+        fs::write(master_key_path, serialized)?;
         
         Ok(())
     }
@@ -90,9 +90,9 @@ impl Agent {
 
         let agent_id = Agent::get_id(&name);
         let agent_path = Agent::get_path(agent_id);
-        let master_key_path = format!("{}/{}", agent_path, MASTER_KEY_FILE);
+        let master_key_path = agent_path.join(MASTER_KEY_FILE);
         
-        let encrypted_data = fs::read(&master_key_path)?;
+        let encrypted_data = fs::read(master_key_path)?;
         let (nonce, cypher) = deserialize_encrypted(&encrypted_data)?;
         
         let master_key_vec = symm_enc::decrypt(&meta_key, &nonce, &cypher);
@@ -105,9 +105,9 @@ impl Agent {
         })
     }
 
-    ////////////////////////////////////
-    // GETTERS /////////////////////////
-    ////////////////////////////////////
+    /// ================================
+    /// GETTERS
+    /// ================================
 
     pub fn get_name(&self) -> &str {
         &self.name
@@ -117,10 +117,9 @@ impl Agent {
         Agent::get_id(&self.name)
     }
 
-    ////////////////////////////////////
-    // CRYPTO //////////////////////////
-    ////////////////////////////////////
-
+    /// ================================
+    /// CRYPTO
+    /// ================================
     pub fn derive_meta_key(mut password: String) -> [u8; 32] {
         let device_id = {
             let device = Device::instance();
@@ -165,16 +164,14 @@ impl Agent {
         hasher.finalize().into()
     }
 
-    pub fn get_path(id: [u8; 32]) -> String {
-        format!("{}/{}", ROOT_SECRETS_FOLDER, hex::encode(id))
+    pub fn get_path(id: [u8; 32]) -> PathBuf {
+        PathBuf::from(ROOT_SECRETS_FOLDER).join(hex::encode(id))
     }
 
     pub fn exists(name: &str) -> bool {
         let agent_id = Agent::get_id(name);
         let agent_path = Agent::get_path(agent_id);
-        let master_key_path = format!("{}/{}", agent_path, MASTER_KEY_FILE);
-        
-        Path::new(&master_key_path).exists()
+        agent_path.join(MASTER_KEY_FILE).exists()
     }
 }
 

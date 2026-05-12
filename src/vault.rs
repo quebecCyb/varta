@@ -1,6 +1,6 @@
 
 use std::fs;
-use std::path::Path;
+use std::path::PathBuf;
 
 type Result<T> = std::result::Result<T, Box<dyn std::error::Error>>;
 
@@ -141,9 +141,10 @@ impl Vault {
     ) -> Result<Self> {
         let master_key = generate_random_key();
         let meta_key = Vault::derive_meta_key(derivation_key, &name);
-        let path = format!("{}/{}", Vault::get_path(agent_id, &name), VAULT_FILE_NAME);
-        let storage = ObjectStorage::new(&path)?;
-        let mut audit = OperationStorage::new(&path)?;
+        let vault_dir = Vault::get_path(agent_id, &name);
+        let vault_file_path = vault_dir.join(VAULT_FILE_NAME);
+        let storage = ObjectStorage::new(&vault_file_path)?;
+        let mut audit = OperationStorage::new(&vault_file_path)?;
 
         let op = Operation::initial(agent_id, &name);
         audit.append_operation(&op.to_bytes()?, &master_key)?;
@@ -178,17 +179,16 @@ impl Vault {
     pub fn open(name: String, agent_id: [u8; 32], derivation_key: &[u8; 32]) -> Result<Vault> {
         let meta_key = Vault::derive_meta_key(derivation_key, &name);
         
-        let path = Vault::get_path(agent_id, &name);
+        let vault_dir = Vault::get_path(agent_id, &name);
         
-    
-        if !Path::new(&path).exists() {
+        if !vault_dir.exists() {
             return Err(format!("Vault not found: {}", name).into());
         }
 
-        let path = format!("{}/{}", path, VAULT_FILE_NAME);
+        let vault_file_path = vault_dir.join(VAULT_FILE_NAME);
         
-        let storage = ObjectStorage::open(&path)?;
-        let audit = OperationStorage::open(&path)?;
+        let storage = ObjectStorage::open(&vault_file_path)?;
+        let audit = OperationStorage::open(&vault_file_path)?;
         
         if !storage.has_vault_metadata() || !audit.has_vault_metadata() {
             return Err("Vault metadata not found in storage".into());
@@ -417,9 +417,9 @@ impl Vault {
     }
 
 
-    pub fn get_path(agent_id: [u8; 32], name: &str) -> String {
+    pub fn get_path(agent_id: [u8; 32], name: &str) -> PathBuf {
         let agent_path = Agent::get_path(agent_id);
-        format!("{}/{}", agent_path, Vault::hash_dir_name(agent_id, name))
+        agent_path.join(Vault::hash_dir_name(agent_id, name))
     }
 }
 

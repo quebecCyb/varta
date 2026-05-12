@@ -5,6 +5,8 @@ use crate::storage::components::block_header::BlockType;
 use crate::storage::components::header::{Header, FileType};
 use crate::config::OBJECT_FILE_EXT;
 
+use std::path::Path;
+
 type Result<T> = std::result::Result<T, Box<dyn std::error::Error>>;
 
 pub struct ObjectStorage {
@@ -12,14 +14,16 @@ pub struct ObjectStorage {
 }
 
 impl ObjectStorage {
-    pub fn new(path: &str) -> Result<Self> {
+    pub fn new<P: AsRef<Path>>(path: P) -> Result<Self> {
         let header = Header::new(FileType::Storage);
-        let storage = Storage::create(format!("{}.{}", path, OBJECT_FILE_EXT), header, true)?;
+        let path_with_ext = path.as_ref().with_extension(OBJECT_FILE_EXT);
+        let storage = Storage::create(path_with_ext, header, true)?;
         Ok(Self { storage })
     }
     
-    pub fn open(path: &str) -> Result<Self> {
-        let storage = Storage::open(format!("{}.{}", path, OBJECT_FILE_EXT))?;
+    pub fn open<P: AsRef<Path>>(path: P) -> Result<Self> {
+        let path_with_ext = path.as_ref().with_extension(OBJECT_FILE_EXT);
+        let storage = Storage::open(path_with_ext)?;
         Ok(Self { storage })
     }
     
