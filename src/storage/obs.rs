@@ -3,6 +3,7 @@ use crate::storage::components::index::Index;
 use crate::storage::components::block::Block;
 use crate::storage::components::block_header::BlockType;
 use crate::storage::components::header::{Header, FileType};
+use crate::config::OBJECT_FILE_EXT;
 
 type Result<T> = std::result::Result<T, Box<dyn std::error::Error>>;
 
@@ -10,22 +11,15 @@ pub struct ObjectStorage {
     storage: Storage, 
 }
 
-impl Drop for ObjectStorage {
-    fn drop(&mut self) {
-        // Storage has its own Drop implementation
-        // which will be called automatically
-    }
-}
-
 impl ObjectStorage {
     pub fn new(path: &str) -> Result<Self> {
         let header = Header::new(FileType::Storage);
-        let storage = Storage::create(path, header)?;
+        let storage = Storage::create(format!("{}.{}", path, OBJECT_FILE_EXT), header, true)?;
         Ok(Self { storage })
     }
     
     pub fn open(path: &str) -> Result<Self> {
-        let storage = Storage::open(path)?;
+        let storage = Storage::open(format!("{}.{}", path, OBJECT_FILE_EXT))?;
         Ok(Self { storage })
     }
     
@@ -89,21 +83,49 @@ impl ObjectStorage {
         Ok(())
     }
     
-    pub fn list_objects(&self) -> Vec<String> {
-        // TODO: Реализовать хранение ключей в индексе
-        // Пока возвращаем пустой список
-        Vec::new()
+    pub fn list_objects<'a>(&'a self, aes_key: &'a [u8; 32]) -> ObjectPlainIter<'a> {
+        ObjectPlainIter {
+            storage: self.storage(),
+            indices: self.storage.list_indices(),
+            pos: 0,
+            aes_key,
+        }
     }
     
-    /// Проверить существование объекта
     pub fn has_object(&self, key: &str) -> bool {
         let index = Index::index_hash(key.as_bytes());
         self.storage.has_block(&index)
     }
     
-    pub fn secure_delete(mut self) -> Result<()> {
-        // todo
-        //self.storage.secure_delete()
-        Ok(())
+    pub fn secure_delete(self) -> Result<()> {
+        self.storage.secure_delete()
+    }
+}
+
+
+pub struct ObjectPlainIter<'a> {
+    storage: &'a Storage,
+    indices: Vec<[u8; 32]>,
+    pos: usize,
+    aes_key: &'a [u8; 32],
+}
+
+impl<'a> Iterator for ObjectPlainIter<'a> {
+    type Item = Result<Vec<u8>>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.pos >= self.indices.len() {
+            return None;
+        }
+
+        let index = self.indices[self.pos];
+        self.pos += 1;
+
+        let res = (|| {
+            let block = self.storage.get_block(&index)?;
+            block.decrypt(self.aes_key)
+        })();
+
+        Some(res)
     }
 }

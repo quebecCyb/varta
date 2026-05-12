@@ -26,7 +26,11 @@ impl Drop for Storage {
 
 impl Storage {
 
-    pub fn create<P: AsRef<Path>>(path: P, header: Header) -> Result<Self> {
+    pub fn list_indices(&self) -> Vec<[u8; 32]> {
+        self.index.keys().into_iter().copied().collect()
+    }
+
+    pub fn create<P: AsRef<Path>>(path: P, header: Header, index_enabled: bool) -> Result<Self> {
         let path = path.as_ref().to_path_buf();
         
         if let Some(parent) = path.parent() {
@@ -36,9 +40,11 @@ impl Storage {
         let mut header = header;
         let index = Index::new();
 
-        let index_bytes = index.to_bytes()
-            .map_err(|e| -> Box<dyn std::error::Error> { e })?;
-        header.set_index_size(index_bytes.len() as u32);
+        if index_enabled { 
+            let index_bytes = index.to_bytes()
+                .map_err(|e| -> Box<dyn std::error::Error> { e })?;
+            header.set_index_size(index_bytes.len() as u32);
+        }
 
         let mut file = File::create(&path)?;
         
@@ -193,7 +199,6 @@ impl Storage {
         }
     }
 
-    /// Проверить существование блока
     pub fn has_block(&self, index: &[u8; 32]) -> bool {
         self.index.contains_key(index)
     }
@@ -355,14 +360,21 @@ impl Storage {
     /// Read metadata (header + index) from file
     fn read_metadata_from_file<R: Read>(reader: &mut R) -> Result<(Header, Index)> {
         let header = read_header(reader)?;
-        let index = read_index(reader, header.index_size())?;
+        
+        let index = if header.index_size() > 0 {
+            read_index(reader, header.index_size())?
+        } else {
+            Index::new()
+        };
         Ok((header, index))
     }
     
     /// Write metadata (header + index) to file
     fn write_metadata_to_file<W: Write>(writer: &mut W, header: &Header, index: &Index) -> Result<()> {
         write_header(writer, header)?;
-        write_index(writer, index)?;
+        if header.index_size() > 0 {
+            write_index(writer, index)?;
+        }
         Ok(())
     }
     
@@ -370,9 +382,11 @@ impl Storage {
     /// Fast update - metadata size is fixed (Header + Index block)
     pub fn update_metadata(&mut self) -> Result<()> {
         // Update index size in header
-        let index_bytes = self.index.to_bytes()
-            .map_err(|e| -> Box<dyn std::error::Error> { e })?;
-        self.header.set_index_size(index_bytes.len() as u32);
+        if self.header.index_size() > 0 {
+            let index_bytes = self.index.to_bytes()
+                .map_err(|e| -> Box<dyn std::error::Error> { e })?;
+            self.header.set_index_size(index_bytes.len() as u32);
+        }
         
         // Open file for writing
         let mut file = OpenOptions::new()

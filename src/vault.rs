@@ -9,8 +9,7 @@ use sha2::{Sha256, Digest};
 use zeroize::Zeroize;
 
 use crate::config::{
-    VERSION, generate_random_key,
-    VAULT_INDEX_FILE, OBJECTS_FOLDER, OPERATIONS_FOLDER,
+    VERSION, generate_random_key, VAULT_FILE_NAME,
     VAULT_AES_KEY_SALT, VAULT_META_KEY_SALT,
     OP_CREATE, OP_UPDATE, OP_DELETE,
 };
@@ -18,7 +17,9 @@ use crate::operation::Operation;
 use crate::vault_object::VaultObject;
 use crate::crypto::symm_enc;
 use crate::agent::Agent;
-use crate::storage::obs::ObjectStorage;
+use crate::storage::obs::{ObjectStorage, ObjectPlainIter};
+use crate::storage::ops::{OperationStorage};
+
 
 
 pub struct Vault {
@@ -30,6 +31,7 @@ pub struct Vault {
     name: String,
     meta_key: [u8; 32],
     storage: ObjectStorage,
+    audit: OperationStorage,
     last_op: Option<Operation>,
 }
 
@@ -139,14 +141,20 @@ impl Vault {
     ) -> Result<Self> {
         let master_key = generate_random_key();
         let meta_key = Vault::derive_meta_key(derivation_key, &name);
-        let last_op = Some(Operation::initial(&master_key, agent_id, &name));
-        let storage = ObjectStorage::new(format!("{}/vault.svrt", Vault::get_path(agent_id, &name)).as_ref())?;
+        let path = format!("{}/{}", Vault::get_path(agent_id, &name), VAULT_FILE_NAME);
+        let storage = ObjectStorage::new(&path)?;
+        let mut audit = OperationStorage::new(&path)?;
+
+        let op = Operation::initial(agent_id, &name);
+        audit.append_operation(&op.to_bytes()?, &master_key)?;
+        let last_op = Some(op);
         let mut vault = Self {
             version: VERSION,
             name: name,
             agent_id,
             master_key,
             storage,
+            audit,
             vault_digest: [0u8; 32],
             meta_key: meta_key,
             last_op,
@@ -159,21 +167,11 @@ impl Vault {
     }
 
     pub fn save(&mut self) -> Result<()> {
-        let vault_path = Vault::get_path(self.agent_id, &self.name);
-        let operations_path = Vault::get_path_operations(self.agent_id, &self.name);
-
-        if !Path::new(&vault_path).exists() {
-            fs::create_dir_all(&vault_path)?;
-        }
-
-        if !Path::new(&operations_path).exists() {
-            fs::create_dir_all(&operations_path)?;
-        }
-
         let (nonce_array, ciphertext_only, tag) = self.encrypt_for_header()?;
         self.storage.set_vault_metadata(nonce_array, ciphertext_only, tag)?;
+        self.audit.set_vault_metadata(nonce_array, ciphertext_only, tag)?;
 
-        println!("Vault saved: {}", vault_path);
+        println!("Vault saved: {}", hex::encode(self.vault_digest));
         Ok(())
     }
 
@@ -181,14 +179,18 @@ impl Vault {
         let meta_key = Vault::derive_meta_key(derivation_key, &name);
         
         let path = Vault::get_path(agent_id, &name);
+        
     
         if !Path::new(&path).exists() {
             return Err(format!("Vault not found: {}", name).into());
         }
+
+        let path = format!("{}/{}", path, VAULT_FILE_NAME);
         
         let storage = ObjectStorage::open(&path)?;
+        let audit = OperationStorage::open(&path)?;
         
-        if !storage.has_vault_metadata() {
+        if !storage.has_vault_metadata() || !audit.has_vault_metadata() {
             return Err("Vault metadata not found in storage".into());
         }
         
@@ -202,6 +204,7 @@ impl Vault {
             agent_id,
             master_key,
             vault_digest,
+            audit,
             name,
             meta_key,
             storage,
@@ -214,25 +217,10 @@ impl Vault {
     }
 
     pub fn read_last_op(&mut self) -> Result<()> {
-        let op_path = Vault::get_path_operations(self.agent_id, &self.name);
-        
-        if !Path::new(&op_path).exists() {
-            return Ok(()); // No operations case
-        }
-        
-        let last_file: Option<String> = fs::read_dir(&op_path)?
-            .filter_map(|entry| entry.ok())
-            .map(|entry| entry.file_name().to_string_lossy().to_string())
-            .max();
-        
-        if let Some(last_file) = last_file {
-            let op = Operation::read(
-                &self.master_key, 
-                self.agent_id, 
-                &self.name, 
-                &last_file
-            );
-            self.last_op = Some(op);
+        let last_op_bytes = self.audit.read_last_operation(&self.master_key)?;
+        if let Some(bytes) = last_op_bytes {
+            let last_op = Operation::from_bytes(&bytes)?;
+            self.last_op = Some(last_op);
         }
         Ok(())
     }
@@ -269,6 +257,11 @@ impl Vault {
             println!("⚠️  Vault state changed after '{}'", operation_name);
             println!("   Old hash: {}", hex::encode(old_digest));
             println!("   New hash: {}", hex::encode(new_digest));
+
+            if let Some(op) = self.last_op.as_ref() {
+                let bytes = op.to_bytes()?;
+                self.audit.append_operation(&bytes, &self.master_key)?;
+            }
         }
         
         self.save()?;
@@ -291,7 +284,6 @@ impl Vault {
             vault.storage.add_object(&key, &data, &vault.master_key)?;
             
             vault.last_op = Some(Operation::new(
-                &vault.master_key,
                 vault,
                 &obj,
                 OP_CREATE,
@@ -319,12 +311,12 @@ impl Vault {
             vault.storage.upd_object(key, &updated_data, &vault.master_key)?;
             
             vault.last_op = Some(Operation::new(
-                &vault.master_key,
                 vault,
                 &obj,
                 OP_UPDATE,
                 vault.last_op.as_ref().ok_or("No last operation found")?,
             ));
+
 
             println!("Object updated: {}", key);
             Ok(())
@@ -332,8 +324,8 @@ impl Vault {
         Ok(())
     }
 
-    pub fn list_objects(&self) -> Result<Vec<String>> {
-        Ok(self.storage.list_objects())
+    pub fn list_objects_iter(&self) -> ObjectPlainIter<'_> {
+        self.storage.list_objects(&self.master_key)
     }
 
     pub fn read_object(&self, key: &str) -> Result<VaultObject> {
@@ -354,12 +346,12 @@ impl Vault {
             vault.storage.secure_del_object(key, &vault.master_key)?;
 
             vault.last_op = Some(Operation::new(
-                &vault.master_key,
                 vault,
                 &VaultObject::new("deleted".to_string(), vec![]),
                 OP_DELETE,
                 vault.last_op.as_ref().ok_or("No last operation found")?,
             ));
+
 
             println!("Object securely deleted: {}", key);
             Ok(())
@@ -429,17 +421,11 @@ impl Vault {
         let agent_path = Agent::get_path(agent_id);
         format!("{}/{}", agent_path, Vault::hash_dir_name(agent_id, name))
     }
-
-    pub fn get_path_operations(agent_id: [u8; 32], name: &str) -> String {
-        let vault_path = Vault::get_path(agent_id, name);
-        format!("{}/{}", vault_path, OPERATIONS_FOLDER)
-    }
 }
 
 impl Drop for Vault {
     fn drop(&mut self) {
         self.master_key.zeroize();
         self.meta_key.zeroize();
-        println!("🔒 Vault master_key and meta_key zeroized");
     }
 }

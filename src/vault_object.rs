@@ -3,6 +3,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use borsh::{BorshSerialize, BorshDeserialize, to_vec, from_slice};
 use sha2::{Sha256, Digest};
+use zeroize::Zeroize;
 
 use crate::config::VERSION;
 
@@ -20,6 +21,14 @@ pub struct VaultObject {
 
     created_at: u64,
     updated_at: u64,
+}
+
+impl Drop for VaultObject {
+    fn drop(&mut self) {
+        self.key.zeroize();
+        self.value.zeroize();
+        self.digest.zeroize();
+    }
 }
 
 

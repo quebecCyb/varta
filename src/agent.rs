@@ -12,10 +12,29 @@ use crate::config::{
     AGENT_MASTER_KEY_SALT, AGENT_MASTER_KEY_CONTEXT,
     AGENT_VAULT_KEY_SALT_PREFIX, AGENT_VAULT_KEY_CONTEXT,
 };
-use borsh::{from_slice, to_vec};
 use zeroize::Zeroize;
 
 type Result<T> = std::result::Result<T, Box<dyn std::error::Error>>;
+
+const NONCE_SIZE: usize = 12;
+
+fn serialize_encrypted(nonce: &[u8], cypher: &[u8]) -> Vec<u8> {
+    let mut data = Vec::with_capacity(NONCE_SIZE + cypher.len());
+    data.extend_from_slice(nonce);
+    data.extend_from_slice(cypher);
+    data
+}
+
+fn deserialize_encrypted(data: &[u8]) -> Result<(Vec<u8>, Vec<u8>)> {
+    if data.len() < NONCE_SIZE {
+        return Err("Invalid encrypted data: too short".into());
+    }
+    
+    let nonce = data[..NONCE_SIZE].to_vec();
+    let cypher = data[NONCE_SIZE..].to_vec();
+    
+    Ok((nonce, cypher))
+}
 
 pub struct Agent {
     name: String,
@@ -50,8 +69,7 @@ impl Agent {
         }
 
         let (nonce, cypher) = symm_enc::encrypt(&meta_key, &self.master_key);
-        let encrypted_data = (nonce, cypher);
-        let serialized = to_vec(&encrypted_data)?;
+        let serialized = serialize_encrypted(&nonce, &cypher);
         
         let master_key_path = format!("{}/{}", agent_path, MASTER_KEY_FILE);
         fs::write(&master_key_path, serialized)?;
@@ -75,8 +93,8 @@ impl Agent {
         let master_key_path = format!("{}/{}", agent_path, MASTER_KEY_FILE);
         
         let encrypted_data = fs::read(&master_key_path)?;
-
-        let (nonce, cypher): (Vec<u8>, Vec<u8>) = from_slice(&encrypted_data)?;
+        let (nonce, cypher) = deserialize_encrypted(&encrypted_data)?;
+        
         let master_key_vec = symm_enc::decrypt(&meta_key, &nonce, &cypher);
         let master_key: [u8; 32] = master_key_vec.try_into()
             .map_err(|_| "Invalid master key length")?;

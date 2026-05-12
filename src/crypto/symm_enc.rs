@@ -2,7 +2,7 @@ use aes_gcm::{Aes256Gcm, KeyInit, aead::{Aead, Nonce}};
 use aes_siv::{Aes128SivAead, KeyInit as SivKeyInit};
 use hex;
 use aes_siv::aead::Nonce as NonceSiv;
-use aes_gcm::aead::generic_array::GenericArray;
+// use aes_gcm::aead::generic_array::GenericArray;
 
 // ============================================
 // Random IV encryption (для vault index, etc)

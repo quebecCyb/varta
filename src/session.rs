@@ -1,6 +1,7 @@
 use crate::device::Device;
 use crate::agent::Agent;
 use crate::vault::Vault;
+use crate::vault_object::VaultObject;
 use zeroize::Zeroize;
 
 type Result<T> = std::result::Result<T, Box<dyn std::error::Error>>;
@@ -91,7 +92,16 @@ impl Session {
     pub fn list_objects(&self) -> Result<Vec<String>> {
         let vault = self.vault.as_ref()
             .ok_or("No vault opened")?;
-        vault.list_objects()
+
+        let mut results: Vec<String> = Vec::new();
+        for res in vault.list_objects_iter() {
+            let mut bytes = res?;
+            let obj = VaultObject::from_bytes(&bytes)?;
+            results.push(obj.key().to_string());
+            bytes.zeroize();
+        }
+
+        Ok(results)
     }
 
     pub fn read_object(&self, key: &str) -> Result<crate::vault_object::VaultObject> {

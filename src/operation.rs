@@ -6,7 +6,7 @@ use borsh::{BorshSerialize, BorshDeserialize, from_slice, to_vec};
 use crate::device::Device;
 use crate::config::{
     OPERATION_FILE_EXT,
-    OP_INITIAL, OP_CREATE,
+    OP_INITIAL,
 };
 use crate::vault::Vault;
 use crate::vault_object::VaultObject;
@@ -39,7 +39,16 @@ pub struct Operation {
 }
 
 impl Operation {
-    pub fn initial(aes_key: &[u8; 32], agent_id: [u8; 32], vault_name: &str) -> Self {
+
+    pub fn to_bytes(&self) -> Result<Vec<u8>, Box<dyn std::error::Error>> {
+        Ok(to_vec(self)?)
+    }
+
+    pub fn from_bytes(bytes: &[u8]) -> Result<Self, Box<dyn std::error::Error>> {
+        Ok(from_slice(bytes)?)
+    }
+
+    pub fn initial(agent_id: [u8; 32], vault_name: &str) -> Self {
         let timestamp = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs();
         let device_id = {
             let device = Device::instance();
@@ -66,11 +75,10 @@ impl Operation {
         op.hash();
         op.hash_iter();
         op.sign();
-        op.save(aes_key);
         op
     }
     
-    pub fn new(aes_key: &[u8; 32], vault: &Vault, obj: &VaultObject, operation_type: &str, prev_op: &Operation) -> Self {
+    pub fn new(vault: &Vault, obj: &VaultObject, operation_type: &str, prev_op: &Operation) -> Self {
         let timestamp = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs();
         let device_id = {
             let device = Device::instance();
@@ -105,39 +113,8 @@ impl Operation {
         op.hash();
         op.hash_iter();
         op.sign();
-        op.save(aes_key);
         op
     }
-
-    pub fn read(aes_key: &[u8; 32], agent_id: [u8; 32], vault_name: &str, filename: &str) -> Self {
-        let path = Vault::get_path_operations(agent_id, vault_name);
-        let path = format!("{}/{}", path, filename);
-        let data = fs::read(&path).unwrap();
-        let (nonce, ciphertext): (Vec<u8>, Vec<u8>) = from_slice(&data).unwrap();
-
-        let aes_key = Operation::derive_operation_key(aes_key, &filename);
-        let op: Operation = from_slice(&symm_enc::decrypt(&aes_key, &nonce, &ciphertext)).unwrap();
-        op
-    }
-
-    pub fn save(&self, aes_key: &[u8; 32]) {
-        let path = Vault::get_path_operations(self.agent_id, &self.vault_name);
-        let filename = Operation::get_filename(self.device_clock, &self.op_hash);
-
-        if !fs::exists(&path).unwrap() {
-            fs::create_dir_all(&path).unwrap();
-        }
-
-        let path = format!("{}/{}", path, filename);
-
-        let aes_key = Operation::derive_operation_key(aes_key, &filename);
-        let (nonce, ciphertext) = symm_enc::encrypt(&aes_key, &to_vec(self).unwrap());
-        let encrypted_data = (nonce, ciphertext);
-
-        fs::write(&path, to_vec(&encrypted_data).unwrap());
-        println!("Operation saved: {}_.....{}", Operation::format_clock(self.device_clock), OPERATION_FILE_EXT);
-    }
-
 
     /// =====================
     /// CRYPTO 
@@ -178,25 +155,8 @@ impl Operation {
         self.op_iter_hash = hasher.finalize().into();
     }
 
-
-    pub fn derive_operation_key(vault_aes_key: &[u8; 32], key: &str) -> [u8; 32] {
-        let salt = "varta_operation_aes_encryption";
-        let hkdf = Hkdf::<Sha256>::new(Some(salt.as_bytes()), vault_aes_key);
-        let mut aes_key = [0u8; 32];
-        let context: &[u8] = key.as_bytes();
-        hkdf.expand(context, &mut aes_key)
-            .expect("HKDF expansion failed");
-
-        aes_key
-    }
-
     fn format_clock(device_clock: u64) -> String {
         format!("{:016x}", device_clock)
-    }
-
-    // Static
-    pub fn get_filename(device_clock: u64, op_hash: &[u8; 32]) -> String {
-        format!("{}_{}.{}", Operation::format_clock(device_clock), hex::encode(op_hash), OPERATION_FILE_EXT)
     }
 }
 

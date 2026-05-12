@@ -7,20 +7,18 @@ pub const VERSION: u8 = 1;
 // Paths and Folders
 // ============================================
 pub const ROOT_SECRETS_FOLDER: &str = "secrets";
-pub const OBJECTS_FOLDER: &str = "obs";
-pub const OPERATIONS_FOLDER: &str = "operations";
 
 // ============================================
 // File Extensions
 // ============================================
-pub const OBJECT_FILE_EXT: &str = "ob";
-pub const OPERATION_FILE_EXT: &str = "op";
+pub const OBJECT_FILE_EXT: &str = "svrt";
+pub const OPERATION_FILE_EXT: &str = "avrt";
 
 // ============================================
 // File Names
 // ============================================
 pub const MASTER_KEY_FILE: &str = "master_key";
-pub const VAULT_INDEX_FILE: &str = "index";
+pub const VAULT_FILE_NAME: &str = "varta";
 
 // ============================================
 // HKDF Salts and Contexts

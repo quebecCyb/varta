@@ -50,7 +50,7 @@ pub struct Header {
     version: u16,
     flags: u8,
     mac: [u8; 32],
-    index_size: u32,
+    index_size: u32,               // if 0 - index off
     
     metadata_nonce: [u8; 12],      // 12 bytes
     metadata_ciphertext: [u8; 97], // 97 bytes (version + agent_id + master_key + vault_digest)
