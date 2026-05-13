@@ -9,7 +9,6 @@ mod operation;
 mod vault;
 mod cli;
 mod storage;
-mod backup;
 
 use cli::Cli;
 
