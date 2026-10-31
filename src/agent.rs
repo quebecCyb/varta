@@ -1,17 +1,11 @@
 use std::fs;
-use std::path::{Path, PathBuf};
+use std::path::{PathBuf};
 use sha2::{Sha256, Digest};
 use hex;
 use hkdf::Hkdf;
 use crate::crypto::symm_enc;
 use crate::device::Device;
-use crate::config::{
-    ROOT_SECRETS_FOLDER, generate_random_key,
-    MASTER_KEY_FILE,
-    AGENT_META_KEY_CONTEXT,
-    AGENT_MASTER_KEY_SALT, AGENT_MASTER_KEY_CONTEXT,
-    AGENT_VAULT_KEY_SALT_PREFIX, AGENT_VAULT_KEY_CONTEXT,
-};
+use crate::config::{generate_random_key, AGENT_META_KEY_CONTEXT, AGENT_MASTER_KEY_SALT, AGENT_MASTER_KEY_CONTEXT, AGENT_VAULT_KEY_SALT_PREFIX, AGENT_VAULT_KEY_CONTEXT, config};
 use zeroize::Zeroize;
 
 type Result<T> = std::result::Result<T, Box<dyn std::error::Error>>;
@@ -71,7 +65,7 @@ impl Agent {
         let (nonce, cypher) = symm_enc::encrypt(&meta_key, &self.master_key);
         let serialized = serialize_encrypted(&nonce, &cypher);
         
-        let master_key_path = agent_path.join(MASTER_KEY_FILE);
+        let master_key_path = agent_path.join(config().master_key_file.clone());
         fs::write(master_key_path, serialized)?;
         
         Ok(())
@@ -90,7 +84,7 @@ impl Agent {
 
         let agent_id = Agent::get_id(&name);
         let agent_path = Agent::get_path(agent_id);
-        let master_key_path = agent_path.join(MASTER_KEY_FILE);
+        let master_key_path = agent_path.join(config().master_key_file.clone());
         
         let encrypted_data = fs::read(master_key_path)?;
         let (nonce, cypher) = deserialize_encrypted(&encrypted_data)?;
@@ -165,13 +159,13 @@ impl Agent {
     }
 
     pub fn get_path(id: [u8; 32]) -> PathBuf {
-        PathBuf::from(ROOT_SECRETS_FOLDER).join(hex::encode(id))
+        config().root_secrets_folder.clone().join(hex::encode(id))
     }
 
     pub fn exists(name: &str) -> bool {
         let agent_id = Agent::get_id(name);
         let agent_path = Agent::get_path(agent_id);
-        agent_path.join(MASTER_KEY_FILE).exists()
+        agent_path.join(config().master_key_file.clone()).exists()
     }
 }
 

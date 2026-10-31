@@ -1,7 +1,5 @@
 
-use std::fs;
 use std::path::PathBuf;
-
 type Result<T> = std::result::Result<T, Box<dyn std::error::Error>>;
 
 use hkdf::Hkdf;
@@ -9,17 +7,18 @@ use sha2::{Sha256, Digest};
 use zeroize::Zeroize;
 
 use crate::config::{
-    VERSION, generate_random_key, VAULT_FILE_NAME,
-    VAULT_AES_KEY_SALT, VAULT_META_KEY_SALT,
-    OP_CREATE, OP_UPDATE, OP_DELETE,
+    VERSION, generate_random_key,
+    VAULT_AES_KEY_SALT,
+    VAULT_META_KEY_SALT, OP_CREATE,
+    OP_UPDATE, OP_DELETE, config
 };
+
 use crate::operation::Operation;
 use crate::vault_object::VaultObject;
 use crate::crypto::symm_enc;
 use crate::agent::Agent;
 use crate::storage::obs::{ObjectStorage, ObjectPlainIter};
 use crate::storage::ops::{OperationStorage};
-
 
 
 pub struct Vault {
@@ -142,7 +141,7 @@ impl Vault {
         let master_key = generate_random_key();
         let meta_key = Vault::derive_meta_key(derivation_key, &name);
         let vault_dir = Vault::get_path(agent_id, &name);
-        let vault_file_path = vault_dir.join(VAULT_FILE_NAME);
+        let vault_file_path = vault_dir.join(config().vault_file_name.clone());
         let storage = ObjectStorage::new(&vault_file_path)?;
         let mut audit = OperationStorage::new(&vault_file_path)?;
 
@@ -151,13 +150,13 @@ impl Vault {
         let last_op = Some(op);
         let mut vault = Self {
             version: VERSION,
-            name: name,
+            name,
             agent_id,
             master_key,
             storage,
             audit,
             vault_digest: [0u8; 32],
-            meta_key: meta_key,
+            meta_key,
             last_op,
         };
 
@@ -185,7 +184,7 @@ impl Vault {
             return Err(format!("Vault not found: {}", name).into());
         }
 
-        let vault_file_path = vault_dir.join(VAULT_FILE_NAME);
+        let vault_file_path = vault_dir.join(config().vault_file_name.clone());
         
         let storage = ObjectStorage::open(&vault_file_path)?;
         let audit = OperationStorage::open(&vault_file_path)?;
@@ -335,6 +334,10 @@ impl Vault {
         
         let data = self.storage.get_object(key, &self.master_key)?;
         VaultObject::from_bytes(&data)
+    }
+
+    pub fn list_objects(&self) -> Result<Vec<VaultObject>> {
+        self.storage.list_objects(&self.master_key)
     }
 
     pub fn delete_object(&mut self, key: &str) -> Result<()> {

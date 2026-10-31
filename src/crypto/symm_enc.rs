@@ -74,3 +74,4 @@ pub fn decrypt_filename(aes_key: &[u8; 32], hex_ciphertext: &str) -> String {
     String::from_utf8(plaintext)
         .expect("Invalid UTF-8 in decrypted filename")
 }
+

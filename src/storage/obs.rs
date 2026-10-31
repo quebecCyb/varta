@@ -10,7 +10,7 @@ use std::path::Path;
 type Result<T> = std::result::Result<T, Box<dyn std::error::Error>>;
 
 pub struct ObjectStorage {
-    storage: Storage, 
+    storage: Storage,
 }
 
 impl ObjectStorage {
