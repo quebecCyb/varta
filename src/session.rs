@@ -2,7 +2,7 @@ use crate::device::Device;
 use crate::agent::Agent;
 use crate::vault::Vault;
 use crate::vault_object::VaultObject;
-use crate::config::ROOT_SECRETS_FOLDER;
+use crate::config::config;
 use zeroize::Zeroize;
 
 use std::fs::{self, File};
@@ -16,8 +16,6 @@ type Result<T> = std::result::Result<T, Box<dyn std::error::Error>>;
 pub struct Session {
     agent: Option<Agent>,
     vault: Option<Vault>,
-    // Session encrpytion for cache | future update 
-    // kek: Vec<u8>,
 }
 
 impl Session {
@@ -136,8 +134,8 @@ impl Session {
         if !agent_path.exists() {
             return Err("Agent folder not found".into());
         }
-
-        let backup_dir = PathBuf::from(ROOT_SECRETS_FOLDER)
+        
+        let backup_dir = config().root_secrets_folder.clone()
             .parent()
             .unwrap_or(Path::new("."))
             .join("backups");
@@ -172,7 +170,7 @@ impl Session {
         let dec = GzDecoder::new(tar_gz);
         let mut archive = tar::Archive::new(dec);
 
-        let restore_dir = PathBuf::from(ROOT_SECRETS_FOLDER);
+        let restore_dir = config().root_secrets_folder.clone();
         fs::create_dir_all(&restore_dir)?;
 
         archive.unpack(&restore_dir)?;

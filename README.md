@@ -42,7 +42,7 @@ This project is a personal endeavor to move the internet towards a more decentra
 
 ### Dependencies
 
-The project uses the following key dependencies:
+The project uses the following KEY dependencies:
 - `aes-gcm` / `aes-siv` - Symmetric encryption
 - `ed25519-dalek` - Classical digital signatures
 - `pqcrypto-dilithium` - Post-quantum signatures
@@ -53,8 +53,8 @@ The project uses the following key dependencies:
 ### First Run
 
 On first launch, VARTA will:
-1. Generate a device key (stored in macOS Keychain on Apple devices)
-2. Prompt you to enter a PIN for key encryption
+1. Generate a device KEY (stored in macOS Keychain on Apple devices)
+2. Prompt you to enter a PIN for KEY encryption
 3. Display the welcome screen
 
 ```
