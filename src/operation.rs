@@ -1,17 +1,13 @@
 
 use std::collections::BTreeMap;
 use sha2::{Sha256, Digest};
-use hkdf::Hkdf;
 use borsh::{BorshSerialize, BorshDeserialize, from_slice, to_vec};
 use crate::device::Device;
 use crate::config::{
-    OPERATION_FILE_EXT,
     OP_INITIAL,
 };
 use crate::vault::Vault;
 use crate::vault_object::VaultObject;
-use crate::crypto::symm_enc;
-use std::fs;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 

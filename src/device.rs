@@ -2,7 +2,7 @@ use sha2::{Sha256, Digest};
 use std::sync::{Mutex, MutexGuard};
 use crate::config::VERSION;
 use crate::crypto::device::keychain;
-use crate::crypto::sign::{ED25519_SIG_LEN, sign_ed25519};
+use crate::crypto::sign::{ED25519_SIG_LEN, sign_ed25519, keypair_postq};
 use zeroize::Zeroize;
 use once_cell::sync::OnceCell;
 
@@ -23,7 +23,7 @@ impl Device {
         DEVICE_INSTANCE.get_or_init(|| {
             let device_key = keychain::load_or_create_key(DEVICE_KEY_NAME);
             let device_id = Self::compute_id(&device_key);
-            
+
             let device = Self {
                 version: VERSION,
                 device_id,

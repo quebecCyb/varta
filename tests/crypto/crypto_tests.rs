@@ -35,7 +35,7 @@ fn test_filename_encryption_deterministic() {
     
     assert_eq!(encrypted1, encrypted2, "Filename encryption should be deterministic");
     
-    let decrypted = symm_enc::decrypt_filename(&key, &encrypted1, None);
+    let decrypted = symm_enc::decrypt_filename(&key, &encrypted1);
     assert_eq!(filename, decrypted);
 }
 

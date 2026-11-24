@@ -3,7 +3,8 @@ use varta::crypto::sign::ED25519_SIG_LEN;
 
 #[test]
 fn test_device_creation() {
-    let device = Device::new();
+    Device::initialize();
+    let device = Device::instance();
     let device_id = device.get_id();
     
     assert_eq!(device_id.len(), 32);
@@ -11,18 +12,24 @@ fn test_device_creation() {
 
 #[test]
 fn test_device_id_consistency() {
-    let device1 = Device::new();
-    let device2 = Device::new();
-    
-    let id1 = device1.get_id();
-    let id2 = device2.get_id();
-    
+    Device::initialize();
+
+    // Вариант А: Ограничиваем область видимости скобками
+    let id1 = {
+        let device1 = Device::instance();
+        device1.get_id() // Блокировка снимается сразу при выходе из {}
+    };
+
+    // Вариант Б: Просто вызываем в одну строку (гарда умрет сразу после точки с запятой)
+    let id2 = Device::instance().get_id();
+
     assert_eq!(id1, id2, "Device ID should be consistent across instances");
 }
 
 #[test]
 fn test_device_signing() {
-    let device = Device::new();
+    Device::initialize();
+    let device = Device::instance();
     let message = b"Test message for device signing";
     
     let signature = device.sign(message);
@@ -32,7 +39,8 @@ fn test_device_signing() {
 
 #[test]
 fn test_device_signature_deterministic() {
-    let device = Device::new();
+    Device::initialize();
+    let device = Device::instance();
     let message = b"Same message";
     
     let sig1 = device.sign(message);
@@ -43,7 +51,8 @@ fn test_device_signature_deterministic() {
 
 #[test]
 fn test_device_signature_different_messages() {
-    let device = Device::new();
+    Device::initialize();
+    let device = Device::instance();
     let message1 = b"First message";
     let message2 = b"Second message";
     

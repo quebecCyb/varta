@@ -1,12 +1,45 @@
 pub use rand::rngs::OsRng;
 use rand::RngCore;
+use std::path::PathBuf;
+use std::sync::OnceLock;
 
 pub const VERSION: u8 = 1;
 
 // ============================================
-// Paths and Folders
+// Config class
 // ============================================
-pub const ROOT_SECRETS_FOLDER: &str = "secrets";
+
+pub static CONFIG: OnceLock<Config> = OnceLock::new();
+
+pub fn config() -> &'static Config {
+    CONFIG.get().expect("Config is not initialized!")
+}
+
+#[derive(Debug)]
+pub struct Config {
+    pub root_secrets_folder: PathBuf,
+    pub master_key_file: PathBuf,
+    pub vault_file_name: PathBuf
+}
+
+impl Config {
+    pub fn load() -> Self {
+        Self {
+            root_secrets_folder: PathBuf::from("secrets"),
+            master_key_file: PathBuf::from("master_key"),
+            vault_file_name: PathBuf::from("varta")
+        }
+    }
+
+    pub fn load_test() -> Self {
+        Self {
+            root_secrets_folder: PathBuf::from("tests_secrets"),
+            master_key_file: PathBuf::from("master_key"),
+            vault_file_name: PathBuf::from("varta")
+        }
+    }
+}
+
 
 // ============================================
 // File Extensions
@@ -14,11 +47,6 @@ pub const ROOT_SECRETS_FOLDER: &str = "secrets";
 pub const OBJECT_FILE_EXT: &str = "svrt";
 pub const OPERATION_FILE_EXT: &str = "avrt";
 
-// ============================================
-// File Names
-// ============================================
-pub const MASTER_KEY_FILE: &str = "master_key";
-pub const VAULT_FILE_NAME: &str = "varta";
 
 // ============================================
 // HKDF Salts and Contexts
