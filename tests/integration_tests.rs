@@ -64,7 +64,7 @@ fn test_vault_object_lifecycle() {
 
     vault.create_object(key.clone(), value.clone());
 
-    let objects = vault.list_objects();
+    let objects = vault.list_objects().unwrap();
     assert!(objects.contains(&key));
 
     let obj = vault.read_object(&key).unwrap();
@@ -77,7 +77,7 @@ fn test_vault_object_lifecycle() {
     assert_eq!(updated_obj.read(), new_value);
 
     vault.delete_object(&key);
-    let objects_after_delete = vault.list_objects();
+    let objects_after_delete = vault.list_objects().unwrap();
     assert!(!objects_after_delete.contains(&key));
 
     cleanup_test_data();

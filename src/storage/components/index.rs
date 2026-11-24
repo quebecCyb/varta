@@ -16,11 +16,9 @@ pub struct Index {
 
 impl Drop for Index {
     fn drop(&mut self) {
-        let keys: Vec<[u8; 32]> = self.index.keys().copied().collect();
-        for mut key in keys {
+        for (mut key, _) in self.index.drain() {
             key.zeroize();
         }
-        self.index.clear();
     }
 }
 

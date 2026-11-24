@@ -8,6 +8,7 @@ use sha2::{Sha256, Digest};
 use super::components::header::{Header, read_header, write_header};
 use super::components::index::{Index, read_index, write_index};
 use super::components::block::Block;
+use super::components::registry::{Registry, read_registry, write_registry};
 
 type Result<T> = std::result::Result<T, Box<dyn std::error::Error>>;
 
@@ -15,6 +16,8 @@ pub struct Storage {
     path: PathBuf,
     header: Header,
     index: Index,
+    
+    registry: Registry,
 }
 
 impl Drop for Storage {
@@ -29,8 +32,11 @@ impl Storage {
     pub fn list_indices(&self) -> Vec<[u8; 32]> {
         self.index.keys().into_iter().copied().collect()
     }
+    pub fn keys(&self) -> &[String] {
+        self.registry.keys()
+    }
 
-    pub fn create<P: AsRef<Path>>(path: P, header: Header, index_enabled: bool) -> Result<Self> {
+    pub fn create<P: AsRef<Path>>(path: P, header: Header, index_enabled: bool, registry_enabled: bool) -> Result<Self> {
         let path = path.as_ref().to_path_buf();
         
         if let Some(parent) = path.parent() {
@@ -39,6 +45,7 @@ impl Storage {
         
         let mut header = header;
         let index = Index::new();
+        let registry = Registry::new();
 
         if index_enabled { 
             let index_bytes = index.to_bytes()
@@ -46,12 +53,18 @@ impl Storage {
             header.set_index_size(index_bytes.len() as u32);
         }
 
+        if registry_enabled {
+            let registry_bytes = registry.to_bytes()
+                .map_err(|e| -> Box<dyn std::error::Error> { e })?;
+            header.set_registry_size(registry_bytes.len() as u32);
+        }
+
         let mut file = File::create(&path)?;
         
-        // Write metadata (header + index)
-        Self::write_metadata_to_file(&mut file, &header, &index)?;
+        // Write metadata (header + index + registry)
+        Self::write_metadata_to_file(&mut file, &header, &index, &registry)?;
         
-        Ok(Self { path, header, index })
+        Ok(Self { path, header, index, registry })
     }
 
     pub fn open<P: AsRef<Path>>(path: P) -> Result<Self> {
@@ -63,10 +76,10 @@ impl Storage {
         
         let mut file = File::open(&path)?;
         
-        // Read metadata (header + index)
-        let (header, index) = Self::read_metadata_from_file(&mut file)?;
+        // Read metadata (header + index + registry)
+        let (header, index, registry) = Self::read_metadata_from_file(&mut file)?;
         
-        Ok(Self { path, header, index })
+        Ok(Self { path, header, index, registry })
     }
 
     // Read binary
@@ -357,8 +370,8 @@ impl Storage {
     }
 
 
-    /// Read metadata (header + index) from file
-    fn read_metadata_from_file<R: Read>(reader: &mut R) -> Result<(Header, Index)> {
+    /// Read metadata (header + index + registry) from file
+    fn read_metadata_from_file<R: Read>(reader: &mut R) -> Result<(Header, Index, Registry)> {
         let header = read_header(reader)?;
         
         let index = if header.index_size() > 0 {
@@ -366,26 +379,43 @@ impl Storage {
         } else {
             Index::new()
         };
-        Ok((header, index))
+
+        let registry = if header.registry_size() > 0 {
+            read_registry(reader, header.registry_size())?
+        } else {
+            Registry::new()
+        };
+
+        Ok((header, index, registry))
     }
     
-    /// Write metadata (header + index) to file
-    fn write_metadata_to_file<W: Write>(writer: &mut W, header: &Header, index: &Index) -> Result<()> {
+    /// Write metadata (header + index + registry) to file
+    fn write_metadata_to_file<W: Write>(writer: &mut W, header: &Header, index: &Index, registry: &Registry) -> Result<()> {
         write_header(writer, header)?;
         if header.index_size() > 0 {
             write_index(writer, index)?;
         }
+        if header.registry_size() > 0 {
+            write_registry(writer, registry)?;
+        }
         Ok(())
     }
     
-    /// Update metadata (header + index) in existing file
-    /// Fast update - metadata size is fixed (Header + Index block)
+    /// Update metadata (header + index + registry) in existing file
+    /// Fast update - metadata size is fixed (Header + Index block + Registry block)
     pub fn update_metadata(&mut self) -> Result<()> {
         // Update index size in header
         if self.header.index_size() > 0 {
             let index_bytes = self.index.to_bytes()
                 .map_err(|e| -> Box<dyn std::error::Error> { e })?;
             self.header.set_index_size(index_bytes.len() as u32);
+        }
+
+        // Update registry size in header
+        if self.header.registry_size() > 0 {
+            let registry_bytes = self.registry.to_bytes()
+                .map_err(|e| -> Box<dyn std::error::Error> { e })?;
+            self.header.set_registry_size(registry_bytes.len() as u32);
         }
         
         // Open file for writing
@@ -395,7 +425,7 @@ impl Storage {
         
         // Seek to beginning and overwrite metadata
         file.seek(SeekFrom::Start(0))?;
-        Self::write_metadata_to_file(&mut file, &self.header, &self.index)?;
+        Self::write_metadata_to_file(&mut file, &self.header, &self.index, &self.registry)?;
         file.sync_all()?;
         
         Ok(())

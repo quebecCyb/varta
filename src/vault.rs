@@ -17,6 +17,7 @@ use crate::operation::Operation;
 use crate::vault_object::VaultObject;
 use crate::crypto::symm_enc;
 use crate::agent::Agent;
+use crate::storage::components::block::Block;
 use crate::storage::obs::{ObjectStorage, ObjectPlainIter};
 use crate::storage::ops::{OperationStorage};
 
@@ -323,9 +324,6 @@ impl Vault {
         Ok(())
     }
 
-    pub fn list_objects_iter(&self) -> ObjectPlainIter<'_> {
-        self.storage.list_objects(&self.master_key)
-    }
 
     pub fn read_object(&self, key: &str) -> Result<VaultObject> {
         if !self.exists_object(key) {
@@ -336,8 +334,13 @@ impl Vault {
         VaultObject::from_bytes(&data)
     }
 
-    pub fn list_objects(&self) -> Result<Vec<VaultObject>> {
+    pub fn list_objects_iter(&self) -> ObjectPlainIter<'_> {
         self.storage.list_objects(&self.master_key)
+    }
+
+
+    pub fn list_objects(&self) -> Result<&[String]> {
+        Ok(self.storage.list_keys())
     }
 
     pub fn delete_object(&mut self, key: &str) -> Result<()> {

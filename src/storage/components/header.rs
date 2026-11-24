@@ -51,7 +51,8 @@ pub struct Header {
     flags: u8,
     mac: [u8; 32],
     index_size: u32,               // if 0 - index off
-    
+    registry_size: u32,            // if 0 - registry off
+
     metadata_nonce: [u8; 12],      // 12 bytes
     metadata_ciphertext: [u8; 97], // 97 bytes (version + agent_id + master_key + vault_digest)
     metadata_tag: [u8; 16],        // 16 bytes
@@ -77,6 +78,7 @@ impl Header {
             flags: 0,
             mac: [0u8; 32],
             index_size: 0,
+            registry_size: 0,
             metadata_nonce: [0u8; 12],
             metadata_ciphertext: [0u8; 97],
             metadata_tag: [0u8; 16],
@@ -90,6 +92,7 @@ impl Header {
         1 +  // flags
         32 + // mac
         4 +  // index_size
+        4 +  // registry_size
         12 + // metadata_nonce
         97 + // metadata_ciphertext
         16 + // metadata_tag
@@ -104,6 +107,7 @@ impl Header {
         buffer.push(self.flags);
         buffer.extend_from_slice(&self.mac);
         buffer.extend_from_slice(&self.index_size.to_le_bytes());
+        buffer.extend_from_slice(&self.registry_size.to_le_bytes());
         buffer.extend_from_slice(&self.metadata_nonce);
         buffer.extend_from_slice(&self.metadata_ciphertext);
         buffer.extend_from_slice(&self.metadata_tag);
@@ -153,6 +157,17 @@ impl Header {
             data[offset + 3],
         ]);
         offset += 4;
+
+        if data.len() < offset + 4 {
+            return Err(io::Error::new(io::ErrorKind::InvalidData, "Missing registry_size"));
+        }
+        let registry_size = u32::from_le_bytes([
+            data[offset],
+            data[offset + 1],
+            data[offset + 2],
+            data[offset + 3],
+        ]);
+        offset += 4;
         
         if data.len() < offset + 12 {
             return Err(io::Error::new(io::ErrorKind::InvalidData, "Missing metadata_nonce"));
@@ -187,6 +202,7 @@ impl Header {
             flags,
             mac,
             index_size,
+            registry_size,
             metadata_nonce,
             metadata_ciphertext,
             metadata_tag,
@@ -204,6 +220,14 @@ impl Header {
 
     pub fn set_index_size(&mut self, size: u32) {
         self.index_size = size;
+    }
+
+    pub fn registry_size(&self) -> u32 {
+        self.registry_size
+    }
+
+    pub fn set_registry_size(&mut self, size: u32) {
+        self.registry_size = size;
     }
     
     pub fn mac(&self) -> &[u8; 32] {
@@ -261,6 +285,10 @@ pub fn read_header<R: Read>(reader: &mut R) -> io::Result<Header> {
     let mut index_size_bytes = [0u8; 4];
     reader.read_exact(&mut index_size_bytes)?;
     let index_size = u32::from_le_bytes(index_size_bytes);
+
+    let mut registry_size_bytes = [0u8; 4];
+    reader.read_exact(&mut registry_size_bytes)?;
+    let registry_size = u32::from_le_bytes(registry_size_bytes);
     
     let mut metadata_nonce = [0u8; 12];
     reader.read_exact(&mut metadata_nonce)?;
@@ -280,6 +308,7 @@ pub fn read_header<R: Read>(reader: &mut R) -> io::Result<Header> {
         flags: flags[0],
         mac,
         index_size,
+        registry_size,
         metadata_nonce,
         metadata_ciphertext,
         metadata_tag,

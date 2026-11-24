@@ -17,7 +17,7 @@ impl ObjectStorage {
     pub fn new<P: AsRef<Path>>(path: P) -> Result<Self> {
         let header = Header::new(FileType::Storage);
         let path_with_ext = path.as_ref().with_extension(OBJECT_FILE_EXT);
-        let storage = Storage::create(path_with_ext, header, true)?;
+        let storage = Storage::create(path_with_ext, header, true, true)?;
         Ok(Self { storage })
     }
     
@@ -94,6 +94,10 @@ impl ObjectStorage {
             pos: 0,
             aes_key,
         }
+    }
+
+    pub fn list_keys(&self) -> &[String] {
+        self.storage.keys()
     }
     
     pub fn has_object(&self, key: &str) -> bool {

@@ -18,7 +18,7 @@ impl OperationStorage {
     pub fn new<P: AsRef<Path>>(path: P) -> Result<Self> {
         let header = Header::new(FileType::Storage);
         let path_with_ext = path.as_ref().with_extension(OPERATION_FILE_EXT);
-        let storage = Storage::create(path_with_ext, header, false)?;
+        let storage = Storage::create(path_with_ext, header, false, false)?;
 
         Ok(Self { storage })
     }
